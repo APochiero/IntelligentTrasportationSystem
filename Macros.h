@@ -8,11 +8,9 @@
 #ifndef MACROS_H_
 #define MACROS_H_
 
-#define NONE1 10
 #define NORMAL1 11
 #define EMERGENCY1 12
 
-#define NONE2 20
 #define NORMAL2 21
 #define EMERGENCY2 22
 

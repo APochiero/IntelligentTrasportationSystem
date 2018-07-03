@@ -21,8 +21,8 @@ AUTOSTART_PROCESSES(&LedManagement);
 
 static process_event_t link_ev;
 static uint8_t street; 			 // 1 Main Street, 0 Secondary Street
-static uint8_t thisWay  	= 0; // 0 NONE, 1 NORMAL, 2 EMERGENCY
-static uint8_t otherWay 	= 0;
+static uint8_t thisStreet  	= 0; // 0 NONE, 1 NORMAL, 2 EMERGENCY
+static uint8_t otherStreet 	= 0;
 static uint8_t crossing 	= 0;
 static uint8_t firstPck     = 1;
 
@@ -59,48 +59,48 @@ static struct runicast_conn runicast;
 
 static void trafficScheduler() {
 	crossing = 0;
-	if ( thisWay == 0 && otherWay == 0 ) { // No vehicles
+	if ( thisStreet == 0 && otherStreet == 0 ) { // No vehicles
 		etimer_set(&toggleLed, CLOCK_SECOND);
 		return;
 	}
 
-	if ( (thisWay == 1 || thisWay == 2) && otherWay == 0 ) { // 1 Vehicle in this way
+	if ( (thisStreet == 1 || thisStreet == 2) && otherStreet == 0 ) { // 1 Vehicle in this way
 		leds_on(LEDS_GREEN);
 		leds_off(LEDS_RED);
 		crossing = 1;
-		thisWay = 0;
+		thisStreet = 0;
 		firstPck = 1;
-	} else if ( thisWay == 0 && (otherWay == 1 || otherWay == 2) ) { // 1 Vehicle other way
+	} else if ( thisStreet == 0 && (otherStreet == 1 || otherStreet == 2) ) { // 1 Vehicle other way
 		leds_on(LEDS_RED);
 		leds_off(LEDS_GREEN);
-		otherWay = 0;
+		otherStreet = 0;
 		firstPck = 1;
-	} else if ( (thisWay == 1 && otherWay == 1) || (thisWay == 2 && otherWay == 2) ) { // 2 Normal or 2 Emer, Main has prio
+	} else if ( (thisStreet == 1 && otherStreet == 1) || (thisStreet == 2 && otherStreet == 2) ) { // 2 Normal or 2 Emer, Main has prio
 		if (street) { // TL1
 			leds_on(LEDS_GREEN);
 			leds_off(LEDS_RED);
 			crossing = 1;
-			thisWay = 0;
+			thisStreet = 0;
 		} else {
 			leds_on(LEDS_RED);
 			leds_off(LEDS_GREEN);
-			otherWay = 0;
+			otherStreet = 0;
 		}
-	} else if ( thisWay == 2 && otherWay == 1 ) { // Emer in this street, Norm in the other street
+	} else if ( thisStreet == 2 && otherStreet == 1 ) { // Emer in this street, Norm in the other street
 		leds_on(LEDS_GREEN);
 		leds_off(LEDS_RED);
 		crossing = 1;
-		thisWay = 0;
-	} else if ( thisWay == 1 && otherWay == 2 ) { // Normal in this street, Emer in the other street
+		thisStreet = 0;
+	} else if ( thisStreet == 1 && otherStreet == 2 ) { // Normal in this street, Emer in the other street
 		leds_on(LEDS_RED);
 		leds_off(LEDS_GREEN);
-		otherWay = 0;
+		otherStreet = 0;
 	}
 	etimer_set(&crossingTimer, CLOCK_SECOND*CROSSINGINTERVAL);
 }
 
 PROCESS_THREAD(LedManagement, ev, data) {
-	static struct etimer checkOtherStreet;
+	static struct etimer waitConcurrency;
 
 	PROCESS_EXITHANDLER( broadcast_close(&broadcast));
 	PROCESS_BEGIN();
@@ -119,32 +119,30 @@ PROCESS_THREAD(LedManagement, ev, data) {
 			street = atoi((char*) data);
 		} else if ( ev == PROCESS_EVENT_MSG ) {
 			etimer_stop(&toggleLed);
-			code = atoi(data);
+			code = atoi((char*) data);
 			if ( street ) { // TL1
 				switch(code) {
-					case NONE1: 	 thisWay  = 0; break;
-					case NORMAL1:	 thisWay  = 1; break;
-					case EMERGENCY1: thisWay  = 2; break;
-					case NONE2:	     otherWay = 0; break;
-					case NORMAL2:    otherWay = 1; break;
-					case EMERGENCY2: otherWay = 2; break;
+					case NORMAL1:	 thisStreet  = 1; break;
+					case EMERGENCY1: thisStreet  = 2; break;
+					case NORMAL2:    otherStreet = 1; break;
+					case EMERGENCY2: otherStreet = 2; break;
+					default: printf("Unknown code\n"); break;
 				}
 			} else { // TL2
 				switch(code) {
-					case NONE1: 	 otherWay  = 0; break;
-					case NORMAL1:	 otherWay  = 1; break;
-					case EMERGENCY1: otherWay  = 2; break;
-					case NONE2:	     thisWay   = 0; break;
-					case NORMAL2:    thisWay   = 1; break;
-					case EMERGENCY2: thisWay   = 2; break;
+					case NORMAL1:	 otherStreet  = 1; break;
+					case EMERGENCY1: otherStreet  = 2; break;
+					case NORMAL2:    thisStreet   = 1; break;
+					case EMERGENCY2: thisStreet   = 2; break;
+					default: printf("Unknown code\n"); break;
 				}
 			}
 			if ( firstPck ) { // if this is the first packet of a pair received
 				firstPck = 0;
 				if ( !crossing  ) // if there is no crossing vehicle, wait a possible packet for 0.5s then make a decision
-					etimer_set(&checkOtherStreet, CLOCK_SECOND*CHECKINTERVAL);
+					etimer_set(&waitConcurrency, CLOCK_SECOND*CHECKINTERVAL);
 			}
-		} else if ( etimer_expired(&checkOtherStreet) || etimer_expired(&crossingTimer)) { // No pckts received or Vehicle has crossed the intersection
+		} else if ( etimer_expired(&waitConcurrency) || etimer_expired(&crossingTimer)) { // No pckts received or Vehicle has crossed the intersection
 			trafficScheduler();
 		} else if (etimer_expired(&toggleLed)){
 			leds_toggle(LEDS_GREEN);
