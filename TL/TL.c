@@ -2,7 +2,7 @@
  * TL.c
  *
  *  Created on: Jul 2, 2018
- *      Author: user
+ *      Author: Amedeo Pochiero
  */
 
 #include "contiki.h"
@@ -25,9 +25,10 @@ static uint8_t thisStreet  	= 0; // 0 NONE, 1 NORMAL, 2 EMERGENCY
 static uint8_t otherStreet 	= 0;
 static uint8_t crossing 	= 0;
 static uint8_t firstPck     = 1;
+static uint8_t debug  		= 1;
+static uint8_t toggleEnable = 1;
+static uint8_t crossingTimerEnable = 0;
 
-static struct etimer crossingTimer;
-static struct etimer toggleLed;
 
 
 static void recv_broadcast( struct broadcast_conn *c, const linkaddr_t *from ) {
@@ -57,10 +58,12 @@ static struct runicast_conn runicast;
 
 
 
-static void trafficScheduler() {
+static void trafficScheduler( struct etimer* toggleLed, struct etimer* crossingTimer) {
 	crossing = 0;
 	if ( thisStreet == 0 && otherStreet == 0 ) { // No vehicles
-		etimer_set(&toggleLed, CLOCK_SECOND);
+		etimer_set(toggleLed, CLOCK_SECOND);
+		toggleEnable = 1;
+		leds_off(LEDS_ALL);
 		return;
 	}
 
@@ -96,11 +99,15 @@ static void trafficScheduler() {
 		leds_off(LEDS_GREEN);
 		otherStreet = 0;
 	}
-	etimer_set(&crossingTimer, CLOCK_SECOND*CROSSINGINTERVAL);
+	etimer_set(crossingTimer, CLOCK_SECOND*CROSSINGINTERVAL);
+	crossingTimerEnable = 1;
 }
 
 PROCESS_THREAD(LedManagement, ev, data) {
 	static struct etimer waitConcurrency;
+	static struct etimer toggleLed;
+	static struct etimer crossingTimer;
+
 
 	PROCESS_EXITHANDLER( broadcast_close(&broadcast));
 	PROCESS_BEGIN();
@@ -110,15 +117,29 @@ PROCESS_THREAD(LedManagement, ev, data) {
 	runicast_open(&runicast, 144, &runicast_calls);
 
 	uint8_t code;
+	static uint8_t waitConcurrencyEnable = 0;
+	etimer_set(&toggleLed, CLOCK_SECOND);
 
 	while(1) {
-		etimer_set(&toggleLed, CLOCK_SECOND);
 		PROCESS_WAIT_EVENT();
 
-		if ( ev == link_ev ) {
+		if ( etimer_expired(&waitConcurrency) && waitConcurrencyEnable ) {
+			trafficScheduler(&toggleLed, &crossingTimer);
+			waitConcurrencyEnable = 0;
+		} else if ( etimer_expired(&crossingTimer) && crossingTimerEnable ) { // No pckts received or Vehicle has crossed the intersection){
+			trafficScheduler(&toggleLed, &crossingTimer);
+			crossingTimerEnable = 0;
+		} else if (etimer_expired(&toggleLed) && toggleEnable ){
+			leds_toggle(LEDS_GREEN);
+			leds_toggle(LEDS_RED);
+			etimer_reset(&toggleLed);
+			if (debug ) printf("TL[%d.%d]: blinking\n",linkaddr_node_addr.u8[0], linkaddr_node_addr.u8[1]);
+		} else if ( ev == link_ev ) {
 			street = atoi((char*) data);
+			if (debug ) printf("TL linked: %d\n", street);
 		} else if ( ev == PROCESS_EVENT_MSG ) {
 			etimer_stop(&toggleLed);
+			toggleEnable = 0;
 			code = atoi((char*) data);
 			if ( street ) { // TL1
 				switch(code) {
@@ -128,6 +149,7 @@ PROCESS_THREAD(LedManagement, ev, data) {
 					case EMERGENCY2: otherStreet = 2; break;
 					default: printf("Unknown code\n"); break;
 				}
+				if (debug ) printf("TL1: Pck code %d\n", code);
 			} else { // TL2
 				switch(code) {
 					case NORMAL1:	 otherStreet  = 1; break;
@@ -136,18 +158,17 @@ PROCESS_THREAD(LedManagement, ev, data) {
 					case EMERGENCY2: thisStreet   = 2; break;
 					default: printf("Unknown code\n"); break;
 				}
+				if (debug ) printf("TL2: Pck code %d\n", code);
 			}
 			if ( firstPck ) { // if this is the first packet of a pair received
 				firstPck = 0;
-				if ( !crossing  ) // if there is no crossing vehicle, wait a possible packet for 0.5s then make a decision
+				if (debug ) printf("TL: first packet received\n");
+				if ( !crossing  ) { // if there is no crossing vehicle, wait a possible packet for 0.5s then make a decision
 					etimer_set(&waitConcurrency, CLOCK_SECOND*CHECKINTERVAL);
+					waitConcurrencyEnable = 1;
+					if (debug ) printf("TL: waiting for concurrency \n");
+				}
 			}
-		} else if ( etimer_expired(&waitConcurrency) || etimer_expired(&crossingTimer)) { // No pckts received or Vehicle has crossed the intersection
-			trafficScheduler();
-		} else if (etimer_expired(&toggleLed)){
-			leds_toggle(LEDS_GREEN);
-			leds_toggle(LEDS_RED);
-			etimer_reset(&toggleLed);
 		}
 	}
 	PROCESS_END();

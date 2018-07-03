@@ -2,17 +2,20 @@
  * G2.c
  *
  *  Created on: Jul 2, 2018
- *      Author: user
+ *      Author: Amedeo Pochiero
  */
 
 #include "contiki.h"
 #include "net/rime/rime.h"
 #include "sys/etimer.h"
+#include "lib/sensors.h"
+#include "dev/button-sensor.h"
+
 #include "stdio.h"
 #include "stdlib.h"
-#include "dev/button-sensor.h"
-#include "../Macros.h"
 #include "stdint.h"
+
+#include "../Macros.h"
 
 
 PROCESS(TrafficScheduler, "TrafficScheduler");
@@ -52,43 +55,41 @@ static struct runicast_conn runicast;
   ========================================================================================================================================================
   ======================================================================================================================================================== */
 
-static struct etimer crossingTimer;
-static struct etimer waitConcurrency;
-
 static uint8_t secondaryStreet = 0;
 static uint8_t mainStreet      = 0;
 static uint8_t firstPck    	   = 1;
 static uint8_t crossing  	   = 0;
+static uint8_t debug 		   = 1;
+static uint8_t waitConcurrencyEnable = 0;
+
 
 static void trafficScheduler() { // Everytime Main street has priority, reactivate button to catch another vehicle
 	crossing = 0;
 	if ( (mainStreet == 1 || mainStreet == 2) && secondaryStreet == 0 ) { // vehicle on main, no vehicle on secondary
 		mainStreet = 0;
 		firstPck = 1;
-		crossing = 1;
-		SENSORS_ACTIVATE(button_sensor);
 	} else if ( mainStreet == 0 && (secondaryStreet == 1 || secondaryStreet == 2) ) { // No vehicle on main, vehicle on secondary
 		secondaryStreet = 0;
 		firstPck = 1;
+		crossing = 1;
+		SENSORS_ACTIVATE(button_sensor);
 	} else if ( (mainStreet == 1 && secondaryStreet == 1) || (mainStreet == 2 && secondaryStreet == 2) ) { // same vehicle on both street, main has priority
 		mainStreet = 0;
-		crossing = 1;
 		SENSORS_ACTIVATE(button_sensor);
 	} else if ( mainStreet == 2 && secondaryStreet == 1 ) {
 		mainStreet = 0;
-		crossing = 1;
-		SENSORS_ACTIVATE(button_sensor);
 	} else if ( mainStreet == 1 && secondaryStreet == 2 ) {
 		secondaryStreet = 0;
+		crossing = 1;
+		SENSORS_ACTIVATE(button_sensor);
 	}
-	etimer_set(&crossingTimer, CLOCK_SECOND*CROSSINGINTERVAL);
 }
 
-static void setConcurrencyTimer() {
-	if ( firstPck ) { // G2 first, waiting for G1 pck
+static void setConcurrencyTimer(struct etimer* waitConcurrency) {
+	if ( firstPck ) {
 		firstPck = 0;
 		if ( !crossing )
-			etimer_set(&waitConcurrency, CLOCK_SECOND*CHECKINTERVAL);
+			etimer_set(waitConcurrency, CLOCK_SECOND*CHECKINTERVAL);
 	}
 }
 
@@ -102,6 +103,8 @@ static void sendNewVehicle(uint8_t type) {
 PROCESS_THREAD( TrafficScheduler, ev, data ) {
 
 	static struct etimer isEmergencyTimer;
+	static struct etimer crossingTimer;
+	static struct etimer waitConcurrency;
 	char msg[3];
 
 	PROCESS_EXITHANDLER(broadcast_close(&broadcast));
@@ -112,12 +115,13 @@ PROCESS_THREAD( TrafficScheduler, ev, data ) {
 	runicast_open(&runicast, 144, &runicast_calls);
 	static uint8_t stillInTime = 0;
 	static uint8_t firstPress  = 1;
+	static uint8_t crossingTimerEnable = 0;
 
 	linkaddr_t semaphore;
 	semaphore.u8[0] = 4;
 	semaphore.u8[1] = 0;
 	sprintf(msg, "%d", 0);
-	printf("%u.%u: Linking to %u.%u\n", linkaddr_node_addr.u8[0], linkaddr_node_addr.u8[1], semaphore.u8[0], semaphore.u8[1]);
+	printf("G2 [%u.%u]: Linking to TL2 [%u.%u]\n", linkaddr_node_addr.u8[0], linkaddr_node_addr.u8[1], semaphore.u8[0], semaphore.u8[1]);
 	packetbuf_copyfrom(msg,2);
 	runicast_send(&runicast, &semaphore, MAX_RETRANSMISSIONS);
 
@@ -127,35 +131,51 @@ PROCESS_THREAD( TrafficScheduler, ev, data ) {
 	while(1) {
 		PROCESS_WAIT_EVENT();
 
-		if ( ev == sensors_event && data == &button_sensor ) { // Button Press
+		if ( etimer_expired(&isEmergencyTimer ) && stillInTime ) { // Timer Expired
+			stillInTime = 0;
+			SENSORS_DEACTIVATE(button_sensor);
+			secondaryStreet = 1;
+			sendNewVehicle(NORMAL2);
+			setConcurrencyTimer(&waitConcurrency); // Normal on G2, wait for G1 pck
+			if (debug ) printf("G2: isEmergency Timer expired\n");
+		}  else if ( etimer_expired(&waitConcurrency) && waitConcurrencyEnable ) {
+			waitConcurrencyEnable = 0;
+			trafficScheduler();
+			etimer_set(&crossingTimer, CLOCK_SECOND*CROSSINGINTERVAL);
+			if ( secondaryStreet == 0 ) {
+				SENSORS_ACTIVATE(button_sensor);
+			}
+		} else if ( etimer_expired(&crossingTimer) && crossingTimerEnable ) {
+			crossingTimerEnable = 0;
+			trafficScheduler();
+			etimer_set(&crossingTimer, CLOCK_SECOND*CROSSINGINTERVAL);
+			if ( secondaryStreet == 0 ) {
+				SENSORS_ACTIVATE(button_sensor);
+			}
+		} else if ( ev == sensors_event && data == &button_sensor ) { // Button Press
 			if ( firstPress ) { // first button press
 				etimer_set(&isEmergencyTimer, CLOCK_SECOND*CHECKINTERVAL);
 				stillInTime = 1;
 				firstPress  = 0;
+				if (debug ) printf("G2: Button Pressed\n");
 			} else if ( stillInTime ) { // Second Button Press within 0.5s
 				etimer_stop(&isEmergencyTimer);
 				stillInTime = 0;
 				sendNewVehicle(EMERGENCY2);
 				secondaryStreet = 2;
 				SENSORS_DEACTIVATE(button_sensor);
-				setConcurrencyTimer(); // Emergency on G2, wait for G1 pck
+				setConcurrencyTimer(&waitConcurrency); // Emergency on G2, wait for G1 pck
+				if (debug ) printf("G2: Second Button Pressed\n");
 			}
-		} else if ( etimer_expired(&isEmergencyTimer ) ) { // Timer Expired
-			stillInTime = 0;
-			SENSORS_DEACTIVATE(button_sensor);
-			secondaryStreet = 1;
-			sendNewVehicle(NORMAL2);
-			setConcurrencyTimer(); // Normal on G2, wait for G1 pck
 		} else if ( ev == PROCESS_EVENT_MSG ) {
 			code = atoi((char*) data);
 			switch(code) {
-				case NORMAL2:    mainStreet = 1; break;
-				case EMERGENCY2: mainStreet = 2; break;
+				case NORMAL1:    mainStreet = 1; break;
+				case EMERGENCY1: mainStreet = 2; break;
 				default: printf("Unknown code\n"); break;
 			}
-			setConcurrencyTimer(); // G1 first, wait for G2 pck
-		} else if ( etimer_expired(&waitConcurrency) || etimer_expired(&crossingTimer) ) {
-			trafficScheduler();
+			setConcurrencyTimer(&waitConcurrency); // G1 first, wait for G2 pck
+			if (debug ) printf("G2: G1 pck received code %d\n", code);
 		}
 	}
 	PROCESS_END();
