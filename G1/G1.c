@@ -67,6 +67,7 @@ PROCESS_THREAD( TrafficScheduler, ev, data) {
 	semaphore.u8[0] = 1;
 	semaphore.u8[1] = 0;
 	printf("%u.%u: Linking to %u.%u\n", linkaddr_node_addr.u8[0], linkaddr_node_addr.u8[1], semaphore.u8[0], semaphore.u8[1]);
+	packetbuf_copyfrom('1',1);
 	runicast_send(&runicast, &semaphore, MAX_RETRANSMISSIONS);
 
 	while(1) {

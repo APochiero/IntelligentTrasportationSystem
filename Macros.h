@@ -1,22 +1,23 @@
 /*
- * Messages.h
+ * Macros.h
  *
  *  Created on: Jul 2, 2018
  *      Author: user
  */
 
-#ifndef MESSAGES_H_
-#define MESSAGES_H_
+#ifndef MACROS_H_
+#define MACROS_H_
 
-#define NONE1 "O1"
-#define NONE2 "O2"
-#define NORMAL1 "N1"
-#define EMERGENCY1 "E1"
-#define NORMAL2 "N2"
-#define EMERGENCY2 "E2"
+#define NONE1 10
+#define NORMAL1 11
+#define EMERGENCY1 12
+
+#define NONE2 20
+#define NORMAL2 21
+#define EMERGENCY2 22
 
 #define CHECKINTERVAL 0.5
 #define CROSSINGINTERVAL 5
 #define MAX_RETRANSMISSIONS 5
 
-#endif /* MESSAGES_H_ */
+#endif /* MACROS_H_ */
