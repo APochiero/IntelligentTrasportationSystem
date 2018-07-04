@@ -5,29 +5,37 @@
  *      Author: Amedeo Pochiero
  */
 
+#include <stdio.h>
+#include <stdlib.h>
+#include <stdint.h>
+
 #include "contiki.h"
 #include "net/rime/rime.h"
 #include "sys/etimer.h"
-#include "stdio.h"
-#include "stdlib.h"
 #include "dev/leds.h"
+#include "dev/sht11/sht11-sensor.h"
+#include "dev/button-sensor.h"
+
 #include "../Macros.h"
 
 
 PROCESS(TrafficScheduler, "TrafficScheduler");
-PROCESS(ToggleLed, "ToggleLed");
+PROCESS(LedSwitcher, "LedSwitcher");
+PROCESS(Sensing,"Sensing" );
+PROCESS(LowBatteryPower, "LowBatteryPower");
 
-AUTOSTART_PROCESSES(&TrafficScheduler, &ToggleLed);
+AUTOSTART_PROCESSES(&TrafficScheduler, &LedSwitcher, &Sensing);
 
 
 static process_event_t link_ev;
 static uint8_t street; 			 // 1 Main Street, 0 Secondary Street
 static uint8_t thisStreet  	= 0; // 0 NONE, 1 NORMAL, 2 EMERGENCY
 static uint8_t otherStreet 	= 0;
-static uint8_t debug  		= 1;
+static uint8_t debug  		= 0;
+static uint8_t debugSensing = 1;
 static uint8_t crossing     = 0;
 static uint8_t firstPck	    = 1;
-
+static uint8_t batteryPower = 100;
 
 static void recv_broadcast( struct broadcast_conn *c, const linkaddr_t *from ) {
 	printf("broadcast message received from %d.%d: '%s' \n", from->u8[0], from->u8[1], (char*) packetbuf_dataptr());
@@ -44,21 +52,19 @@ static void recv_runicast(struct runicast_conn *c, const linkaddr_t *from, uint8
 }
 
 static void sent_runicast(struct runicast_conn *c, const linkaddr_t *to, uint8_t retransmissions){
-  printf("Runicast message successfully sent to %d.%d, retransmissions %d\n", to->u8[0], to->u8[1], retransmissions);
+  printf("Runicast message successfully sent to %u.%u, retransmissions %d\n", to->u8[0], to->u8[1], retransmissions);
 }
 
 static void timedout_runicast(struct runicast_conn *c, const linkaddr_t *to, uint8_t retransmissions){
-  printf("Runicast message timed out when sending to %d.%d, retransmissions %d\n", to->u8[0], to->u8[1], retransmissions);
+  printf("Runicast message timed out when sending to %u.%u, retransmissions %d\n", to->u8[0], to->u8[1], retransmissions);
 }
 
 static const struct runicast_callbacks runicast_calls = {recv_runicast, sent_runicast, timedout_runicast};
 static struct runicast_conn runicast;
 
-
-
 static void schedule( struct etimer* crossingTimer) {
 	if ( thisStreet == 0 && otherStreet == 0 ) { // No vehicles
-		process_start(&ToggleLed, NULL);
+		process_start(&LedSwitcher, NULL);
 		firstPck = 1;
 		leds_off(LEDS_ALL);
 		crossing = 0;
@@ -124,7 +130,7 @@ PROCESS_THREAD(TrafficScheduler, ev, data) {
 			street = atoi((char*) data);
 			if (debug ) printf("TL linked: %d\n", street);
 		} else if ( ev == PROCESS_EVENT_MSG ) {
-			process_exit(&ToggleLed);
+			process_exit(&LedSwitcher);
 			code = atoi((char*) data);
 			if ( street ) { // TL1
 				switch(code) {
@@ -159,17 +165,99 @@ PROCESS_THREAD(TrafficScheduler, ev, data) {
 	PROCESS_END();
 }
 
-
-PROCESS_THREAD(ToggleLed, ev, data) {
-	static struct etimer toggleLed;
+PROCESS_THREAD(LedSwitcher, ev, data) {
+	static struct etimer toggleTimer;
 	PROCESS_BEGIN();
-	etimer_set(&toggleLed, CLOCK_SECOND);
+	etimer_set(&toggleTimer, CLOCK_SECOND);
 	while (1) {
-		PROCESS_WAIT_EVENT_UNTIL(etimer_expired(&toggleLed));
+		PROCESS_WAIT_EVENT_UNTIL(etimer_expired(&toggleTimer));
 		leds_toggle(LEDS_GREEN);
 		leds_toggle(LEDS_RED);
-		etimer_reset(&toggleLed);
+		etimer_reset(&toggleTimer);
+		batteryPower -= 5;
 		if (debug ) printf("TL[%d.%d]: blinking\n",linkaddr_node_addr.u8[0], linkaddr_node_addr.u8[1]);
 	}
 	PROCESS_END();
 }
+
+PROCESS_THREAD(Sensing, ev, data) {
+	static struct etimer sensingTimer;
+	static uint8_t sensingInterval = 5;
+
+	PROCESS_EXITHANDLER(runicast_close(&runicast));
+	PROCESS_BEGIN();
+
+	uint8_t channel = 153 + street;
+//	runicast_open(&runicast, channel, &runicast_calls);
+	etimer_set(&sensingTimer, CLOCK_SECOND*sensingInterval);
+
+	int16_t temperature;
+	int16_t humidity;
+	char msg[2];
+	linkaddr_t G1Sink;
+	G1Sink.u8[0] = 1;
+	G1Sink.u8[1] = 0;
+	if (debugSensing ) printf("TL: Sink node Rime Address %u.%u \n",G1Sink.u8[0], G1Sink.u8[1] );
+
+	while(1) {
+		PROCESS_WAIT_EVENT_UNTIL( etimer_expired(&sensingTimer) );
+
+		SENSORS_ACTIVATE(sht11_sensor);
+		temperature = (sht11_sensor.value(SHT11_SENSOR_TEMP)/10-396)/10;
+		humidity    = sht11_sensor.value(SHT11_SENSOR_HUMIDITY)/41;
+		SENSORS_DEACTIVATE(sht11_sensor);
+		if (debugSensing ) printf("TL: temperature %d\n", temperature );
+		if (debugSensing ) printf("TL: humidity %d\n", humidity );
+
+//		sprintf(msg, "%d", 1);
+////		sprintf(msg+2, "%d", humidity);
+//		if (debugSensing ) printf("TL: Sensing packet %s\n", msg );
+//		packetbuf_copyfrom(msg,2);
+//	    if(!runicast_is_transmitting(&runicast))
+//			runicast_send(&runicast, &G1Sink, MAX_RETRANSMISSIONS);
+
+		if ( batteryPower >= 10 )
+			batteryPower -= 10;
+		else
+			batteryPower = 0;
+
+		if ( batteryPower <= 20 ) {
+			if (debugSensing ) printf("TL: battery under 20 \n");
+			sensingInterval = 20;
+			etimer_set(&sensingTimer, CLOCK_SECOND*sensingInterval);
+			process_start(&LowBatteryPower, NULL);
+		} else if ( batteryPower <= 50 ) {
+			if (debugSensing ) printf("TL: battery under 50 \n");
+			sensingInterval = 10;
+			etimer_set(&sensingTimer, CLOCK_SECOND*sensingInterval);
+		} else {
+			if (debugSensing ) printf("TL: battery remained %d \n", batteryPower);
+			etimer_reset(&sensingTimer);
+		}
+	}
+	PROCESS_END();
+}
+
+PROCESS_THREAD(LowBatteryPower, ev, data) {
+	static struct etimer blinkTimer;
+	PROCESS_BEGIN();
+	etimer_set(&blinkTimer, CLOCK_SECOND);
+	SENSORS_ACTIVATE(button_sensor);
+	while(1) {
+		PROCESS_WAIT_EVENT();
+		if ( ev == sensors_event && data == &button_sensor ) {
+			if (debugSensing ) printf("TL: Battery Recharged\n");
+			batteryPower = 100;
+			SENSORS_DEACTIVATE(button_sensor);
+			leds_off(LEDS_BLUE);
+			PROCESS_EXIT();
+		} else if ( etimer_expired(&blinkTimer) ) {
+			if (debugSensing ) printf("TL: Low Battery Alarm\n");
+			leds_toggle(LEDS_BLUE);
+			etimer_reset(&blinkTimer);
+		}
+	}
+	PROCESS_END();
+}
+
+

@@ -14,13 +14,16 @@
 #include "sys/etimer.h"
 #include "lib/sensors.h"
 #include "dev/button-sensor.h"
+#include "dev/sht11/sht11-sensor.h"
+
 
 #include "../Macros.h"
 
 
 PROCESS(TrafficScheduler, "TrafficScheduler");
+PROCESS(Sensing, "Sensing");
 
-AUTOSTART_PROCESSES(&TrafficScheduler);
+AUTOSTART_PROCESSES(&TrafficScheduler, &Sensing);
 
 static void recv_status( struct broadcast_conn *c, const linkaddr_t *from ) {
 	printf("broadcast message received from %d.%d: '%s' \n", from->u8[0], from->u8[1], (char*) packetbuf_dataptr());
@@ -58,11 +61,13 @@ static struct runicast_conn runicast;
 static uint8_t secondaryStreet = 0;
 static uint8_t mainStreet      = 0;
 static uint8_t crossing  	   = 0;
-static uint8_t debug 		   = 1;
+static uint8_t debug 		   = 0;
+static uint8_t debugSensing	   = 1;
 static uint8_t active 	  	   = 1;
 static uint8_t firstPress  	   = 1;
 static uint8_t firstPck 	   = 1;
 static uint8_t waitConcurrencyEnable = 0;
+
 
 
 static void activateButton() {
@@ -198,4 +203,42 @@ PROCESS_THREAD( TrafficScheduler, ev, data ) {
 		}
 	}
 	PROCESS_END();
+}
+
+PROCESS_THREAD(Sensing, ev, data) {
+	static struct etimer sensingTimer;
+
+	PROCESS_EXITHANDLER(runicast_close(&runicast));
+	PROCESS_BEGIN();
+
+	runicast_open(&runicast, 152, &runicast_calls);
+	etimer_set(&sensingTimer, CLOCK_SECOND*SENSINGINTERVAL);
+
+	int16_t temperature;
+	int16_t humidity;
+	char msg[6];
+	linkaddr_t G1Sink;
+	G1Sink.u8[0] = 1;
+	G1Sink.u8[1] = 0;
+
+	while(1) {
+		PROCESS_WAIT_EVENT_UNTIL( etimer_expired(&sensingTimer) );
+
+		SENSORS_ACTIVATE(sht11_sensor);
+		temperature = (sht11_sensor.value(SHT11_SENSOR_TEMP)/10-396)/10;
+		humidity    = sht11_sensor.value(SHT11_SENSOR_HUMIDITY)/41;
+		SENSORS_DEACTIVATE(sht11_sensor);
+		if (debugSensing ) printf("TL: temperature %d\n", temperature );
+		if (debugSensing ) printf("TL: humidity %d\n", humidity );
+
+		sprintf(msg, "%d", temperature);
+		sprintf(msg+2, "%d", humidity);
+		if (debugSensing ) printf("TL: Sensing packet %s\n", msg );
+		packetbuf_copyfrom(msg,6);
+	    if(!runicast_is_transmitting(&runicast))
+			runicast_send(&runicast, &G1Sink, MAX_RETRANSMISSIONS);
+		etimer_reset(&sensingTimer);
+	}
+	PROCESS_END();
+
 }

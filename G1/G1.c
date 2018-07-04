@@ -19,8 +19,9 @@
 
 
 PROCESS(TrafficScheduler, "TrafficScheduler");
+PROCESS(SensingSink, "SensingSink");
 
-AUTOSTART_PROCESSES(&TrafficScheduler);
+AUTOSTART_PROCESSES(&TrafficScheduler, &SensingSink);
 
 static void recv_status( struct broadcast_conn *c, const linkaddr_t *from ) {
 	printf("broadcast message received from %d.%d: '%s' \n", from->u8[0], from->u8[1], (char*) packetbuf_dataptr());
@@ -35,9 +36,11 @@ static void send_status(struct broadcast_conn *c, int status, int num_tx) {
 static const struct broadcast_callbacks broadcast_calls = {recv_status, send_status};
 static struct broadcast_conn broadcast;
 
+static process_event_t sensing_ev;
+
 static void recv_runicast(struct runicast_conn *c, const linkaddr_t *from, uint8_t seqno){
-//	printf("New temperature of %s degrees received from %d.%d. The packet sequence number is %d\n", (char *)packetbuf_dataptr(), from->u8[0], from->u8[1], seqno);
-//	process_post(&LedManagement, packetbuf_dataptr());
+	printf("New data of %s degrees received from %d.%d. The packet sequence number is %d\n", (char *)packetbuf_dataptr(), from->u8[0], from->u8[1], seqno);
+	process_post(&SensingSink, sensing_ev, packetbuf_dataptr());
 }
 
 static void sent_runicast(struct runicast_conn *c, const linkaddr_t *to, uint8_t retransmissions){
@@ -58,7 +61,7 @@ static struct runicast_conn runicast;
 static uint8_t secondaryStreet = 0;
 static uint8_t mainStreet      = 0;
 static uint8_t crossing  	   = 0;
-static uint8_t debug           = 1;
+static uint8_t debug           = 0;
 static uint8_t active		   = 1;
 static uint8_t firstPress  	   = 1;
 static uint8_t firstPck  	   = 1;
@@ -83,14 +86,12 @@ static void deactivateButton() {
 }
 
 static void trafficScheduler(struct etimer* crossingTimer) { // Everytime Main street has priority, reactivate button to catch another vehicle
-
 	if ( mainStreet == 0 && secondaryStreet == 0 ) {
 		crossing = 0;
 		firstPck = 1;
 		if (debug ) printf("Both no vehicle: MainStreet BLINK, Secondary Street BLINK\n");
 		return;
 	}
-
 	if ( (mainStreet == 1 || mainStreet == 2) && secondaryStreet == 0 ) { // vehicle on main, no vehicle on secondary
 		if (debug ) printf("MainStreet normal or emergency GREEN, Secondary Street no vehicle RED\n");
 		mainStreet = 0;
@@ -132,16 +133,12 @@ static void sendNewVehicle(uint8_t type) {
 	broadcast_send(&broadcast);
 }
 
-
 PROCESS_THREAD( TrafficScheduler, ev, data ) {
 
 	static struct etimer isEmergencyTimer;
 	static struct etimer crossingTimer;
 	static struct etimer waitConcurrency;
-
-
 	char msg[3];
-
 	PROCESS_EXITHANDLER(broadcast_close(&broadcast));
 	PROCESS_EXITHANDLER(runicast_close(&runicast));
 	PROCESS_BEGIN();
@@ -149,7 +146,6 @@ PROCESS_THREAD( TrafficScheduler, ev, data ) {
 	broadcast_open(&broadcast, 2018, &broadcast_calls);
 	runicast_open(&runicast, 144, &runicast_calls);
 	static uint8_t stillInTime = 0;
-
 
 	linkaddr_t semaphore;
 	semaphore.u8[0] = 2;
@@ -205,6 +201,26 @@ PROCESS_THREAD( TrafficScheduler, ev, data ) {
 			}
 			setConcurrencyTimer(&waitConcurrency); // G2 first, wait for G1 pck
 		}
+	}
+	PROCESS_END();
+}
+
+PROCESS_THREAD(SensingSink, ev, data) {
+
+//	static struct etimer sensingTimer;
+
+	PROCESS_BEGIN();
+
+	runicast_open(&runicast, 152, &runicast_calls);
+	runicast_open(&runicast, 153, &runicast_calls);
+	runicast_open(&runicast, 154, &runicast_calls);
+
+	printf("Listening on channels 152-153-154\n");
+	sensing_ev = process_alloc_event();
+
+	while(1) {
+		PROCESS_WAIT_EVENT_UNTIL(ev == sensing_ev);
+		printf("Temperature and humidity received %s\n", (char*) data);
 	}
 	PROCESS_END();
 }
