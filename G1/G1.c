@@ -8,20 +8,24 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdint.h>
+#include <string.h>
 
 #include "contiki.h"
 #include "net/rime/rime.h"
 #include "sys/etimer.h"
 #include "lib/sensors.h"
 #include "dev/button-sensor.h"
+#include "dev/sht11/sht11-sensor.h"
+#include "dev/serial-line.h"
 
 #include "../Macros.h"
 
-
+PROCESS(Init, "Initialization");
 PROCESS(TrafficScheduler, "TrafficScheduler");
 PROCESS(SensingSink, "SensingSink");
+PROCESS(WriteEmergencyWarning, "WriteEmergencyWarning");
 
-AUTOSTART_PROCESSES(&TrafficScheduler, &SensingSink);
+AUTOSTART_PROCESSES( &Init );
 
 static void recv_status( struct broadcast_conn *c, const linkaddr_t *from ) {
 	printf("broadcast message received from %d.%d: '%s' \n", from->u8[0], from->u8[1], (char*) packetbuf_dataptr());
@@ -39,12 +43,15 @@ static struct broadcast_conn broadcast;
 static process_event_t sensing_ev;
 
 static void recv_runicast(struct runicast_conn *c, const linkaddr_t *from, uint8_t seqno){
-	printf("New data of %s degrees received from %d.%d. The packet sequence number is %d\n", (char *)packetbuf_dataptr(), from->u8[0], from->u8[1], seqno);
+	//printf("New data of %s degrees received from %d.%d. The packet sequence number is %d\n", (char *)packetbuf_dataptr(), from->u8[0], from->u8[1], seqno);
 	process_post(&SensingSink, sensing_ev, packetbuf_dataptr());
 }
 
 static void sent_runicast(struct runicast_conn *c, const linkaddr_t *to, uint8_t retransmissions){
-  printf("Runicast message successfully sent to %d.%d, retransmissions %d\n", to->u8[0], to->u8[1], retransmissions);
+  printf("G1 successfully linked to %d.%d, retransmissions %d\n", to->u8[0], to->u8[1], retransmissions);
+  if ( process_is_running(&Init) ) {
+	  process_post(&Init, PROCESS_EVENT_CONTINUE, NULL);
+  }
 }
 
 static void timedout_runicast(struct runicast_conn *c, const linkaddr_t *to, uint8_t retransmissions){
@@ -62,11 +69,12 @@ static uint8_t secondaryStreet = 0;
 static uint8_t mainStreet      = 0;
 static uint8_t crossing  	   = 0;
 static uint8_t debug           = 0;
+static uint8_t debugSensing    = 0;
 static uint8_t active		   = 1;
 static uint8_t firstPress  	   = 1;
 static uint8_t firstPck  	   = 1;
 static uint8_t waitConcurrencyEnable = 0;
-
+static char  emergencyWarning[MSGMAXSIZE] = "";
 
 static void activateButton() {
 	if ( !active ) {
@@ -133,20 +141,11 @@ static void sendNewVehicle(uint8_t type) {
 	broadcast_send(&broadcast);
 }
 
-PROCESS_THREAD( TrafficScheduler, ev, data ) {
-
-	static struct etimer isEmergencyTimer;
-	static struct etimer crossingTimer;
-	static struct etimer waitConcurrency;
-	char msg[3];
-	PROCESS_EXITHANDLER(broadcast_close(&broadcast));
+PROCESS_THREAD(Init, ev, data) {
 	PROCESS_EXITHANDLER(runicast_close(&runicast));
 	PROCESS_BEGIN();
-
-	broadcast_open(&broadcast, 2018, &broadcast_calls);
 	runicast_open(&runicast, 144, &runicast_calls);
-	static uint8_t stillInTime = 0;
-
+	char msg[3];
 	linkaddr_t semaphore;
 	semaphore.u8[0] = 2;
 	semaphore.u8[1] = 0;
@@ -154,6 +153,25 @@ PROCESS_THREAD( TrafficScheduler, ev, data ) {
 	printf("G1 [%u.%u]: Linking to TL1 [%u.%u]\n", linkaddr_node_addr.u8[0], linkaddr_node_addr.u8[1], semaphore.u8[0], semaphore.u8[1]);
 	packetbuf_copyfrom(msg,2);
 	runicast_send(&runicast, &semaphore, MAX_RETRANSMISSIONS);
+	PROCESS_WAIT_EVENT_UNTIL(ev == PROCESS_EVENT_CONTINUE);
+	runicast_close(&runicast);
+	process_start(&TrafficScheduler, NULL);
+	process_start(&WriteEmergencyWarning, NULL);
+	process_start(&SensingSink, NULL);
+	PROCESS_END();
+}
+
+PROCESS_THREAD( TrafficScheduler, ev, data ) {
+
+	static struct etimer isEmergencyTimer;
+	static struct etimer crossingTimer;
+	static struct etimer waitConcurrency;
+
+	PROCESS_EXITHANDLER(broadcast_close(&broadcast));
+	PROCESS_BEGIN();
+
+	broadcast_open(&broadcast, 129, &broadcast_calls);
+	static uint8_t stillInTime = 0;
 
 	SENSORS_ACTIVATE(button_sensor);
 	if (debug ) printf("G1: Button Activate\n");
@@ -207,20 +225,79 @@ PROCESS_THREAD( TrafficScheduler, ev, data ) {
 
 PROCESS_THREAD(SensingSink, ev, data) {
 
-//	static struct etimer sensingTimer;
-
+	static int16_t temperature[SENSORSCOUNT];
+	static int16_t humidity[SENSORSCOUNT];
+	static uint8_t isNew[SENSORSCOUNT-1];
+	static uint8_t index;
 	PROCESS_BEGIN();
 
-	runicast_open(&runicast, 152, &runicast_calls);
-	runicast_open(&runicast, 153, &runicast_calls);
-	runicast_open(&runicast, 154, &runicast_calls);
+	runicast_open(&runicast, 144, &runicast_calls);
 
-	printf("Listening on channels 152-153-154\n");
+	printf("Listening on channels 144\n");
 	sensing_ev = process_alloc_event();
 
+	uint8_t i;
+	int16_t tempAvg, humAvg;
+	for ( i = 0; i < SENSORSCOUNT-1; i++ ) {
+		isNew[i] = 0;
+	}
 	while(1) {
 		PROCESS_WAIT_EVENT_UNTIL(ev == sensing_ev);
-		printf("Temperature and humidity received %s\n", (char*) data);
+		char* packet = (char*) data;
+		index = atoi( strtok( packet,  '/') );
+		temperature[index] = atoi( strtok( packet + 2, '/') );
+		humidity[index] = atoi( strtok( packet + 5, '\0') );
+		isNew[index] = 1;
+		if (debugSensing ) printf("G1: Received from %d temp %d, hum %d \n", index, temperature[index], humidity[index]);
+
+		if( isNew[0] == 1 && isNew[1] == 1 && isNew[2] == 1) {
+			SENSORS_ACTIVATE(sht11_sensor);
+			temperature[SENSORSCOUNT-1] = (sht11_sensor.value(SHT11_SENSOR_TEMP)/10-396)/10;
+			humidity[SENSORSCOUNT-1]    = sht11_sensor.value(SHT11_SENSOR_HUMIDITY)/41;
+			SENSORS_DEACTIVATE(sht11_sensor);
+
+			tempAvg = 0;
+			humAvg = 0;
+			for ( i = 0; i < SENSORSCOUNT; i++ ) {
+				tempAvg += temperature[i];
+				humAvg += humidity[i];
+				if (debugSensing ) printf("G1: tempSum %d, humSum %d \n", tempAvg, humAvg);
+			}
+			tempAvg =  tempAvg / SENSORSCOUNT;
+			humAvg  = humAvg / SENSORSCOUNT;
+
+			for ( i = 0; i < SENSORSCOUNT-1; i++ ) {
+				isNew[i] = 0;
+			}
+			if ( strcmp(emergencyWarning, "") ) {
+				printf("%s \nTemp:%dC     Humidity:%d%%\n", emergencyWarning, tempAvg, humAvg );
+			} else {
+				printf("Temp:%dC     Humidity:%d%%\n", tempAvg, humAvg );
+			}
+		}
+	}
+	PROCESS_END();
+}
+
+PROCESS_THREAD(WriteEmergencyWarning, ev, data) {
+	PROCESS_BEGIN();
+	PROCESS_WAIT_EVENT_UNTIL( ev == serial_line_event_message );
+
+	while(1) {
+		while( strcmp ( (char*) data, PASSWORD ) != 0 ) {
+			printf("Wrong Password!\n");
+			PROCESS_WAIT_EVENT_UNTIL( ev == serial_line_event_message );
+		}
+		printf("Authentication Completed!\nWrite Emergency Warning:\n");
+		packetbuf_clear();
+		strcpy(emergencyWarning, "");
+		PROCESS_WAIT_EVENT_UNTIL( ev == serial_line_event_message );
+		if ( strlen((char*)data) > MSGMAXSIZE )
+			printf("Error! Message too long (%d char)\n", strlen((char*)data) );
+		else {
+			strcpy(emergencyWarning, (char*) data );
+		}
+		PROCESS_WAIT_EVENT_UNTIL( ev == serial_line_event_message );
 	}
 	PROCESS_END();
 }

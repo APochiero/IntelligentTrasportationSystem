@@ -19,11 +19,14 @@
 
 #include "../Macros.h"
 
-
+PROCESS(Init, "Initialization");
 PROCESS(TrafficScheduler, "TrafficScheduler");
 PROCESS(Sensing, "Sensing");
 
-AUTOSTART_PROCESSES(&TrafficScheduler, &Sensing);
+AUTOSTART_PROCESSES(&Init);
+
+static uint8_t debug 		   = 0;
+static uint8_t debugSensing	   = 0;
 
 static void recv_status( struct broadcast_conn *c, const linkaddr_t *from ) {
 	printf("broadcast message received from %d.%d: '%s' \n", from->u8[0], from->u8[1], (char*) packetbuf_dataptr());
@@ -38,13 +41,12 @@ static void send_status(struct broadcast_conn *c, int status, int num_tx) {
 static const struct broadcast_callbacks broadcast_calls = {recv_status, send_status};
 static struct broadcast_conn broadcast;
 
-static void recv_runicast(struct runicast_conn *c, const linkaddr_t *from, uint8_t seqno){
-//	printf("New temperature of %s degrees received from %d.%d. The packet sequence number is %d\n", (char *)packetbuf_dataptr(), from->u8[0], from->u8[1], seqno);
-//	process_post(&LedManagement, packetbuf_dataptr());
-}
+static void recv_runicast(struct runicast_conn *c, const linkaddr_t *from, uint8_t seqno){}
 
 static void sent_runicast(struct runicast_conn *c, const linkaddr_t *to, uint8_t retransmissions){
-  printf("Runicast message successfully sent to %d.%d, retransmissions %d\n", to->u8[0], to->u8[1], retransmissions);
+  if( debug ) printf("Runicast message successfully sent to %d.%d, retransmissions %d\n", to->u8[0], to->u8[1], retransmissions);
+  if ( process_is_running(&Init) )
+  	  process_post(&Init, PROCESS_EVENT_CONTINUE, NULL);
 }
 
 static void timedout_runicast(struct runicast_conn *c, const linkaddr_t *to, uint8_t retransmissions){
@@ -61,8 +63,6 @@ static struct runicast_conn runicast;
 static uint8_t secondaryStreet = 0;
 static uint8_t mainStreet      = 0;
 static uint8_t crossing  	   = 0;
-static uint8_t debug 		   = 0;
-static uint8_t debugSensing	   = 1;
 static uint8_t active 	  	   = 1;
 static uint8_t firstPress  	   = 1;
 static uint8_t firstPck 	   = 1;
@@ -131,24 +131,12 @@ static void sendNewVehicle(uint8_t type) {
 	broadcast_send(&broadcast);
 }
 
-PROCESS_THREAD( TrafficScheduler, ev, data ) {
 
-	static struct etimer isEmergencyTimer;
-	static struct etimer crossingTimer;
-	static struct etimer waitConcurrency;
-	char msg[3];
-
-	PROCESS_EXITHANDLER(broadcast_close(&broadcast));
+PROCESS_THREAD( Init, ev, data) {
 	PROCESS_EXITHANDLER(runicast_close(&runicast));
 	PROCESS_BEGIN();
-
-	SENSORS_ACTIVATE(button_sensor);
-	if (debug ) printf("G2: Button Activate\n");
-
-	broadcast_open(&broadcast, 2018, &broadcast_calls);
 	runicast_open(&runicast, 144, &runicast_calls);
-	static uint8_t stillInTime = 0;
-
+	char msg[3];
 	linkaddr_t semaphore;
 	semaphore.u8[0] = 4;
 	semaphore.u8[1] = 0;
@@ -156,9 +144,29 @@ PROCESS_THREAD( TrafficScheduler, ev, data ) {
 	printf("G2 [%u.%u]: Linking to TL2 [%u.%u]\n", linkaddr_node_addr.u8[0], linkaddr_node_addr.u8[1], semaphore.u8[0], semaphore.u8[1]);
 	packetbuf_copyfrom(msg,2);
 	runicast_send(&runicast, &semaphore, MAX_RETRANSMISSIONS);
+	PROCESS_WAIT_EVENT_UNTIL(ev == PROCESS_EVENT_CONTINUE);
+	runicast_close(&runicast);
+	process_start(&TrafficScheduler, NULL);
+	process_start(&Sensing, NULL);
+	PROCESS_END();
+}
+
+PROCESS_THREAD( TrafficScheduler, ev, data ) {
+
+	static struct etimer isEmergencyTimer;
+	static struct etimer crossingTimer;
+	static struct etimer waitConcurrency;
+
+	PROCESS_EXITHANDLER(broadcast_close(&broadcast));
+	PROCESS_BEGIN();
+
+	SENSORS_ACTIVATE(button_sensor);
+	if (debug ) printf("G2: Button Activate\n");
+
+	broadcast_open(&broadcast, 129, &broadcast_calls);
+	static uint8_t stillInTime = 0;
 
 	uint8_t code;
-
 	while(1) {
 		PROCESS_WAIT_EVENT();
 
@@ -211,13 +219,13 @@ PROCESS_THREAD(Sensing, ev, data) {
 	PROCESS_EXITHANDLER(runicast_close(&runicast));
 	PROCESS_BEGIN();
 
-	runicast_open(&runicast, 152, &runicast_calls);
+	runicast_open(&runicast, 144, &runicast_calls);
 	etimer_set(&sensingTimer, CLOCK_SECOND*SENSINGINTERVAL);
 
 	int16_t temperature;
 	int16_t humidity;
-	char msg[6];
-	linkaddr_t G1Sink;
+	static char msg[SENSINGPACKETSIZE];
+	static linkaddr_t G1Sink;
 	G1Sink.u8[0] = 1;
 	G1Sink.u8[1] = 0;
 
@@ -228,13 +236,15 @@ PROCESS_THREAD(Sensing, ev, data) {
 		temperature = (sht11_sensor.value(SHT11_SENSOR_TEMP)/10-396)/10;
 		humidity    = sht11_sensor.value(SHT11_SENSOR_HUMIDITY)/41;
 		SENSORS_DEACTIVATE(sht11_sensor);
-		if (debugSensing ) printf("TL: temperature %d\n", temperature );
-		if (debugSensing ) printf("TL: humidity %d\n", humidity );
 
-		sprintf(msg, "%d", temperature);
-		sprintf(msg+2, "%d", humidity);
+		sprintf(msg, "2"); // 0 TL2, 1 TL1, 2 G2
+		sprintf(msg+1,"/");
+		sprintf(msg+2, "%d", temperature);
+		sprintf(msg+4, "/");
+		sprintf(msg+5, "%d", humidity);
+
 		if (debugSensing ) printf("TL: Sensing packet %s\n", msg );
-		packetbuf_copyfrom(msg,6);
+		packetbuf_copyfrom(msg,SENSINGPACKETSIZE);
 	    if(!runicast_is_transmitting(&runicast))
 			runicast_send(&runicast, &G1Sink, MAX_RETRANSMISSIONS);
 		etimer_reset(&sensingTimer);
