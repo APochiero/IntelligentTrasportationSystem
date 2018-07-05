@@ -108,7 +108,7 @@
       </interface_config>
       <interface_config>
         org.contikios.cooja.mspmote.interfaces.MspSerial
-        <history>aoidsjoisajdoiajsdio~;NES~;aoidsjoisajdoiajsdioj~;NES~;aoidsjoisajdoiajsdiojdas~;NES~;oaijsdoijsadiojasdiojsaiodjaisodj~;NES~;asdasd~;NES~;asldhiaulsdhliuashdliaudhluddsaluha~;NES~;asdasdasdasdasdad~;NES~;NES~;</history>
+        <history>Vacche in strada~;NES~;aoidsjoisajdoiajsdio~;NES~;aoidsjoisajdoiajsdioj~;NES~;aoidsjoisajdoiajsdiojdas~;NES~;oaijsdoijsadiojasdiojsaiodjaisodj~;NES~;asdasd~;NES~;asldhiaulsdhliuashdliaudhluddsaluha~;NES~;NES~;</history>
       </interface_config>
       <motetype_identifier>sky1</motetype_identifier>
     </mote>
@@ -186,7 +186,7 @@
       <viewport>4.21128134279367 0.0 0.0 4.21128134279367 -66.0781028375973 -22.059164506731605</viewport>
     </plugin_config>
     <width>400</width>
-    <z>4</z>
+    <z>1</z>
     <height>400</height>
     <location_x>1</location_x>
     <location_y>1</location_y>
@@ -199,7 +199,7 @@
       <coloring />
     </plugin_config>
     <width>734</width>
-    <z>7</z>
+    <z>3</z>
     <height>646</height>
     <location_x>986</location_x>
     <location_y>160</location_y>
@@ -242,7 +242,7 @@
       <scrollpos>0,0</scrollpos>
     </plugin_config>
     <width>350</width>
-    <z>2</z>
+    <z>5</z>
     <height>300</height>
     <location_x>292</location_x>
     <location_y>504</location_y>
@@ -255,7 +255,7 @@
       <scrollpos>0,0</scrollpos>
     </plugin_config>
     <width>350</width>
-    <z>6</z>
+    <z>7</z>
     <height>300</height>
     <location_x>448</location_x>
     <location_y>160</location_y>
@@ -268,7 +268,7 @@
       <scrollpos>0,0</scrollpos>
     </plugin_config>
     <width>350</width>
-    <z>5</z>
+    <z>6</z>
     <height>300</height>
     <location_x>627</location_x>
     <location_y>161</location_y>
@@ -281,7 +281,7 @@
       <scrollpos>0,0</scrollpos>
     </plugin_config>
     <width>350</width>
-    <z>1</z>
+    <z>4</z>
     <height>300</height>
     <location_x>619</location_x>
     <location_y>505</location_y>
@@ -294,7 +294,7 @@
       <scrollpos>0,0</scrollpos>
     </plugin_config>
     <width>350</width>
-    <z>3</z>
+    <z>2</z>
     <height>300</height>
     <location_x>34</location_x>
     <location_y>490</location_y>

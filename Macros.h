@@ -25,4 +25,19 @@
 #define SENSINGPACKETSIZE 9
 #define MAX_RETRANSMISSIONS 5
 
+#define G1ADDRESS0 1
+#define G1ADDRESS1 0
+
+#define TL1ADDRESS0 2
+#define TL1ADDRESS1 0
+
+#define G2ADDRESS0 3
+#define G2ADDRESS1 0
+
+#define TL2ADDRESS0 4
+#define TL2ADDRESS1 0
+
+#define DEBUG 0
+#define DEBUGSENSING 0
+
 #endif /* MACROS_H_ */

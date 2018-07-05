@@ -27,60 +27,49 @@ PROCESS(WriteEmergencyWarning, "WriteEmergencyWarning");
 
 AUTOSTART_PROCESSES( &Init );
 
-static void recv_status( struct broadcast_conn *c, const linkaddr_t *from ) {
-	printf("broadcast message received from %d.%d: '%s' \n", from->u8[0], from->u8[1], (char*) packetbuf_dataptr());
+
+static void recv_broadcast( struct broadcast_conn *c, const linkaddr_t *from ) {
+	if ( DEBUG ) printf("broadcast message received from %d.%d: '%s' \n", from->u8[0], from->u8[1], (char*) packetbuf_dataptr());
 	process_post(&TrafficScheduler, PROCESS_EVENT_MSG, (char*) packetbuf_dataptr());
 }
 
-static void send_status(struct broadcast_conn *c, int status, int num_tx) {
-
-  printf("broadcast message sent. Status %d. For this packet, this is transmission number %d\n", status, num_tx);
+static void send_broadcast(struct broadcast_conn *c, int status, int num_tx) {
+  if ( DEBUG ) printf("broadcast message sent. Status %d. For this packet, this is transmission number %d\n", status, num_tx);
 }
-
-static const struct broadcast_callbacks broadcast_calls = {recv_status, send_status};
-static struct broadcast_conn broadcast;
 
 static process_event_t sensing_ev;
-
 static void recv_runicast(struct runicast_conn *c, const linkaddr_t *from, uint8_t seqno){
-	//printf("New data of %s degrees received from %d.%d. The packet sequence number is %d\n", (char *)packetbuf_dataptr(), from->u8[0], from->u8[1], seqno);
 	process_post(&SensingSink, sensing_ev, packetbuf_dataptr());
 }
-
 static void sent_runicast(struct runicast_conn *c, const linkaddr_t *to, uint8_t retransmissions){
   printf("G1 successfully linked to %d.%d, retransmissions %d\n", to->u8[0], to->u8[1], retransmissions);
   if ( process_is_running(&Init) ) {
 	  process_post(&Init, PROCESS_EVENT_CONTINUE, NULL);
   }
 }
-
 static void timedout_runicast(struct runicast_conn *c, const linkaddr_t *to, uint8_t retransmissions){
   printf("Runicast message timed out when sending to %d.%d, retransmissions %d\n", to->u8[0], to->u8[1], retransmissions);
 }
 
-static const struct runicast_callbacks runicast_calls = {recv_runicast, sent_runicast, timedout_runicast};
+static struct broadcast_conn broadcast;
 static struct runicast_conn runicast;
+static const struct broadcast_callbacks broadcast_calls = {recv_broadcast, send_broadcast};
+static const struct runicast_callbacks runicast_calls = {recv_runicast, sent_runicast, timedout_runicast};
 
-/*========================================================================================================================================================
-  ========================================================================================================================================================
-  ======================================================================================================================================================== */
-
-static uint8_t secondaryStreet = 0;
-static uint8_t mainStreet      = 0;
-static uint8_t crossing  	   = 0;
-static uint8_t debug           = 0;
-static uint8_t debugSensing    = 0;
-static uint8_t active		   = 1;
-static uint8_t firstPress  	   = 1;
-static uint8_t firstPck  	   = 1;
-static uint8_t waitConcurrencyEnable = 0;
-static char  emergencyWarning[MSGMAXSIZE] = "";
+static uint8_t secondaryStreet = 0; // secondaryStreet status 0 no vehicle, 1 normal, 2 emergency
+static uint8_t mainStreet      = 0; // mainStreet status 0 no vehicle, 1 normal, 2 emergency
+static uint8_t crossing  	   = 0; // 0 no vehicle is crossing, 1 otherwise
+static uint8_t active 	  	   = 1; // button status
+static uint8_t firstPress  	   = 1; // 0 button was already pressed, 1 button is not pressed yet
+static uint8_t firstPck 	   = 1; // 0 one packet already received, 1 no packet received yet
+static uint8_t waitConcurrencyEnable = 0; // 1 if waitConcurrencyTimer is enabled
+static char  emergencyWarning[MSGMAXSIZE] = ""; // RTD Emergency Message Buffer
 
 static void activateButton() {
 	if ( !active ) {
 		SENSORS_ACTIVATE(button_sensor);
 		active = 1;
-		if (debug ) printf("G1: Button Activate\n");
+		if (DEBUG ) printf("G1: Button Activate\n");
 		firstPress = 1;
 	}
 }
@@ -89,68 +78,58 @@ static void deactivateButton() {
 	if ( active ) {
 		SENSORS_DEACTIVATE(button_sensor);
 		active = 0;
-		if (debug ) printf("G1: Button Deactivate\n");
+		if (DEBUG ) printf("G1: Button Deactivate\n");
 	}
 }
 
-static void trafficScheduler(struct etimer* crossingTimer) { // Everytime Main street has priority, reactivate button to catch another vehicle
-	if ( mainStreet == 0 && secondaryStreet == 0 ) {
+static void schedule(struct etimer* crossingTimer) { // Everytime Main street has priority, reactivate button to catch another vehicle
+	if ( mainStreet == 0 && secondaryStreet == 0 ) { // No vehicles
 		crossing = 0;
 		firstPck = 1;
-		if (debug ) printf("Both no vehicle: MainStreet BLINK, Secondary Street BLINK\n");
+		if (DEBUG ) printf("Both no vehicle: MainStreet BLINK, Secondary Street BLINK\n");
 		return;
 	}
-	if ( (mainStreet == 1 || mainStreet == 2) && secondaryStreet == 0 ) { // vehicle on main, no vehicle on secondary
-		if (debug ) printf("MainStreet normal or emergency GREEN, Secondary Street no vehicle RED\n");
+	if ( ((mainStreet == 1 || mainStreet == 2) && secondaryStreet == 0 ) || 						 // Vehicle on main, no vehicle on secondary
+		 ((mainStreet == 1 && secondaryStreet == 1) || (mainStreet == 2 && secondaryStreet == 2)) || // Same vehicle on both street
+		 ( mainStreet == 2 && secondaryStreet == 1 ) ) { 											 // Emergency on main, normal on secondary
 		mainStreet = 0;
 		activateButton();
-	} else if ( mainStreet == 0 && (secondaryStreet == 1 || secondaryStreet == 2) ) { // No vehicle on main, vehicle on secondary
-		if (debug ) printf("MainStreet no vehicle RED, Secondary Street normal or emergency GREEN\n");
-		secondaryStreet = 0;
-	} else if ( (mainStreet == 1 && secondaryStreet == 1) || (mainStreet == 2 && secondaryStreet == 2) ) { // same vehicle on both street, main has priority
-		if (debug ) printf("Same type of vehicle: MainStreet GREEN, Secondary Street RED\n");
-		mainStreet = 0;
-		activateButton();
-	} else if ( mainStreet == 2 && secondaryStreet == 1 ) {
-		if (debug ) printf("MainStreet emergency GREEN, Secondary Street normal RED\n");
-		mainStreet = 0;
-		activateButton();
-	} else if ( mainStreet == 1 && secondaryStreet == 2 ) {
-		if (debug ) printf("MainStreet normal RED, Secondary Street emergency GREEN\n");
+	} else if (( mainStreet == 0 && (secondaryStreet == 1 || secondaryStreet == 2)) || 				 // No vehicle on main, vehicle on secondary
+			   ( mainStreet == 1 && secondaryStreet == 2 )) { 										 // Normal on main, emergency on secondary
 		secondaryStreet = 0;
 	}
 	crossing = 1;
 	etimer_set(crossingTimer, CLOCK_SECOND*CROSSINGINTERVAL);
 }
 
-static void setConcurrencyTimer(struct etimer* waitConcurrency) {
+static void setConcurrencyTimer(struct etimer* waitConcurrency) { // if 1 vehicle comes within 0.5s after the first one, they are scheduled together
 	if ( firstPck ) {
 		firstPck = 0;
 		if ( !crossing ) {
 			etimer_set(waitConcurrency, CLOCK_SECOND*CHECKINTERVAL);
 			waitConcurrencyEnable = 1;
-			if (debug ) printf("G1: waiting for concurrency\n");
+			if (DEBUG ) printf("G1: waiting for concurrency\n");
 		}
 	}
 }
 
-static void sendNewVehicle(uint8_t type) {
+static void sendNewVehicle(uint8_t type) { // Broadcast that new vehicle has arrived
 	char msg[3];
 	sprintf(msg, "%d", type);
 	packetbuf_copyfrom(msg,3);
 	broadcast_send(&broadcast);
 }
 
-PROCESS_THREAD(Init, ev, data) {
+PROCESS_THREAD(Init, ev, data) { 				// Link G1 to TL1 then start other processes
 	PROCESS_EXITHANDLER(runicast_close(&runicast));
 	PROCESS_BEGIN();
 	runicast_open(&runicast, 144, &runicast_calls);
 	char msg[3];
 	linkaddr_t semaphore;
-	semaphore.u8[0] = 2;
-	semaphore.u8[1] = 0;
+	semaphore.u8[0] = TL1ADDRESS0;
+	semaphore.u8[1] = TL1ADDRESS1;
 	sprintf(msg, "%d", 1);
-	printf("G1 [%u.%u]: Linking to TL1 [%u.%u]\n", linkaddr_node_addr.u8[0], linkaddr_node_addr.u8[1], semaphore.u8[0], semaphore.u8[1]);
+	if ( DEBUG ) printf("G1 [%u.%u]: Linking to TL1 [%u.%u]\n", linkaddr_node_addr.u8[0], linkaddr_node_addr.u8[1], semaphore.u8[0], semaphore.u8[1]);
 	packetbuf_copyfrom(msg,2);
 	runicast_send(&runicast, &semaphore, MAX_RETRANSMISSIONS);
 	PROCESS_WAIT_EVENT_UNTIL(ev == PROCESS_EVENT_CONTINUE);
@@ -174,34 +153,34 @@ PROCESS_THREAD( TrafficScheduler, ev, data ) {
 	static uint8_t stillInTime = 0;
 
 	SENSORS_ACTIVATE(button_sensor);
-	if (debug ) printf("G1: Button Activate\n");
+	if (DEBUG ) printf("G1: Button Activate\n");
 	uint8_t code;
 
 	while(1) {
 		PROCESS_WAIT_EVENT();
 
-		if ( etimer_expired(&isEmergencyTimer) && stillInTime) { // Timer Expired
-			if (debug ) printf("G1: isEmergencyTimer expired\n");
+		if ( etimer_expired(&isEmergencyTimer) && stillInTime) { // EmergencyTimer expired --> send Normal vehicle code
+			if (DEBUG ) printf("G1: isEmergencyTimer expired\n");
 			stillInTime = 0;
 			mainStreet = 1;
 			sendNewVehicle(NORMAL1);
-			setConcurrencyTimer(&waitConcurrency); // Normal on G1, wait for G2 pck
+			setConcurrencyTimer(&waitConcurrency);
 			deactivateButton();
-		}  else if ( etimer_expired(&waitConcurrency) && waitConcurrencyEnable && !crossing ) {
-			if (debug ) printf("G1: Concurrency Timer expired\n");
+		}  else if ( etimer_expired(&waitConcurrency) && waitConcurrencyEnable && !crossing ) { // Concurrency checked --> schedule
+			if (DEBUG ) printf("G1: Concurrency Timer expired\n");
 			waitConcurrencyEnable = 0;
-			trafficScheduler(&crossingTimer);
-		} else if ( etimer_expired(&crossingTimer) && crossing ) {
-			if (debug ) printf("G1: Crossing Timer expired\n");
-			trafficScheduler(&crossingTimer);
-		} else if ( ev == sensors_event && data == &button_sensor ) { // Button Press
+			schedule(&crossingTimer);
+		} else if ( etimer_expired(&crossingTimer) && crossing ) { // Crossing interval expired --> schedule again
+			if (DEBUG ) printf("G1: Crossing Timer expired\n");
+			schedule(&crossingTimer);
+		} else if ( ev == sensors_event && data == &button_sensor ) { // Button Press --> if first press wait for second press, otherwise wait for concurrency
 			if ( firstPress ) { // first button press
-				if (debug ) printf("G1: Button Pressed\n");
+				if (DEBUG ) printf("G1: Button Pressed\n");
 				etimer_set(&isEmergencyTimer, CLOCK_SECOND*CHECKINTERVAL);
 				stillInTime = 1;
 				firstPress  = 0;
 			} else if ( stillInTime ) { // Second Button Press within 0.5s
-				if (debug ) printf("G1: Second Button Pressed\n");
+				if (DEBUG ) printf("G1: Second Button Pressed\n");
 				etimer_stop(&isEmergencyTimer);
 				stillInTime = 0;
 				sendNewVehicle(EMERGENCY1);
@@ -209,25 +188,25 @@ PROCESS_THREAD( TrafficScheduler, ev, data ) {
 				deactivateButton();
 				setConcurrencyTimer(&waitConcurrency); // Emergency on G1, wait for G2 pck
 			}
-		} else if ( ev == PROCESS_EVENT_MSG ) {
+		} else if ( ev == PROCESS_EVENT_MSG ) {  // G1 notified a vehicle
 			code = atoi((char*) data);
-			if (debug ) printf("G1: G2 pck received code %d\n", code);
+			if (DEBUG ) printf("G1: G2 pck received code %d\n", code);
 			switch(code) {
 				case NORMAL2:    secondaryStreet = 1; break;
 				case EMERGENCY2: secondaryStreet = 2; break;
 				default: printf("Unknown code\n"); break;
 			}
-			setConcurrencyTimer(&waitConcurrency); // G2 first, wait for G1 pck
+			setConcurrencyTimer(&waitConcurrency); // wait for vehicle coming on G1
 		}
 	}
 	PROCESS_END();
 }
 
-PROCESS_THREAD(SensingSink, ev, data) {
+PROCESS_THREAD(SensingSink, ev, data) { // Receive data sensed by the other sensors and write the average on RTD
 
 	static int16_t temperature[SENSORSCOUNT];
 	static int16_t humidity[SENSORSCOUNT];
-	static uint8_t isNew[SENSORSCOUNT-1];
+	static uint8_t isNew[SENSORSCOUNT-1]; // flags
 	static uint8_t index;
 	PROCESS_BEGIN();
 
@@ -243,14 +222,14 @@ PROCESS_THREAD(SensingSink, ev, data) {
 	}
 	while(1) {
 		PROCESS_WAIT_EVENT_UNTIL(ev == sensing_ev);
-		char* packet = (char*) data;
+		char* packet = (char*) data;				// Packet format [ id/temperatureValue/humidityValue ]
 		index = atoi( strtok( packet,  '/') );
 		temperature[index] = atoi( strtok( packet + 2, '/') );
 		humidity[index] = atoi( strtok( packet + 5, '\0') );
 		isNew[index] = 1;
-		if (debugSensing ) printf("G1: Received from %d temp %d, hum %d \n", index, temperature[index], humidity[index]);
+		if (DEBUGSENSING ) printf("G1: Received from %d temp %d, hum %d \n", index, temperature[index], humidity[index]);
 
-		if( isNew[0] == 1 && isNew[1] == 1 && isNew[2] == 1) {
+		if( isNew[0] == 1 && isNew[1] == 1 && isNew[2] == 1) { // if every value is new
 			SENSORS_ACTIVATE(sht11_sensor);
 			temperature[SENSORSCOUNT-1] = (sht11_sensor.value(SHT11_SENSOR_TEMP)/10-396)/10;
 			humidity[SENSORSCOUNT-1]    = sht11_sensor.value(SHT11_SENSOR_HUMIDITY)/41;
@@ -261,7 +240,7 @@ PROCESS_THREAD(SensingSink, ev, data) {
 			for ( i = 0; i < SENSORSCOUNT; i++ ) {
 				tempAvg += temperature[i];
 				humAvg += humidity[i];
-				if (debugSensing ) printf("G1: tempSum %d, humSum %d \n", tempAvg, humAvg);
+				if (DEBUGSENSING) printf("G1: tempSum %d, humSum %d \n", tempAvg, humAvg);
 			}
 			tempAvg =  tempAvg / SENSORSCOUNT;
 			humAvg  = humAvg / SENSORSCOUNT;
@@ -279,12 +258,12 @@ PROCESS_THREAD(SensingSink, ev, data) {
 	PROCESS_END();
 }
 
-PROCESS_THREAD(WriteEmergencyWarning, ev, data) {
+PROCESS_THREAD(WriteEmergencyWarning, ev, data) { //Waiting for emergency message
 	PROCESS_BEGIN();
 	PROCESS_WAIT_EVENT_UNTIL( ev == serial_line_event_message );
 
 	while(1) {
-		while( strcmp ( (char*) data, PASSWORD ) != 0 ) {
+		while( strcmp ( (char*) data, PASSWORD ) != 0 ) { // Authentication
 			printf("Wrong Password!\n");
 			PROCESS_WAIT_EVENT_UNTIL( ev == serial_line_event_message );
 		}
