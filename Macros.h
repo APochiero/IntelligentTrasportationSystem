@@ -2,7 +2,7 @@
  * Macros.h
  *
  *  Created on: Jul 2, 2018
- *      Author: user
+ *      Author: Amedeo Pochiero
  */
 
 #ifndef MACROS_H_
@@ -38,6 +38,5 @@
 #define TL2ADDRESS1 0
 
 #define DEBUG 0
-#define DEBUGSENSING 0
 
 #endif /* MACROS_H_ */

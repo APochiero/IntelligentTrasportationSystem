@@ -108,7 +108,7 @@
       </interface_config>
       <interface_config>
         org.contikios.cooja.mspmote.interfaces.MspSerial
-        <history>Vacche in strada~;NES~;aoidsjoisajdoiajsdio~;NES~;aoidsjoisajdoiajsdioj~;NES~;aoidsjoisajdoiajsdiojdas~;NES~;oaijsdoijsadiojasdiojsaiodjaisodj~;NES~;asdasd~;NES~;asldhiaulsdhliuashdliaudhluddsaluha~;NES~;NES~;</history>
+        <history>_~;NES~;porva~;NES~;asdiojasdoij~;NES~;Vacche in strada~;NES~;aoidsjoisajdoiajsdio~;NES~;aoidsjoisajdoiajsdioj~;NES~;aoidsjoisajdoiajsdiojdas~;NES~;NES~;</history>
       </interface_config>
       <motetype_identifier>sky1</motetype_identifier>
     </mote>
@@ -186,7 +186,7 @@
       <viewport>4.21128134279367 0.0 0.0 4.21128134279367 -66.0781028375973 -22.059164506731605</viewport>
     </plugin_config>
     <width>400</width>
-    <z>1</z>
+    <z>5</z>
     <height>400</height>
     <location_x>1</location_x>
     <location_y>1</location_y>
@@ -199,7 +199,7 @@
       <coloring />
     </plugin_config>
     <width>734</width>
-    <z>3</z>
+    <z>7</z>
     <height>646</height>
     <location_x>986</location_x>
     <location_y>160</location_y>
@@ -217,7 +217,7 @@
       <zoomfactor>500.0</zoomfactor>
     </plugin_config>
     <width>1720</width>
-    <z>9</z>
+    <z>11</z>
     <height>166</height>
     <location_x>0</location_x>
     <location_y>806</location_y>
@@ -229,7 +229,7 @@
       <decorations>true</decorations>
     </plugin_config>
     <width>1040</width>
-    <z>8</z>
+    <z>10</z>
     <height>160</height>
     <location_x>680</location_x>
     <location_y>0</location_y>
@@ -241,11 +241,11 @@
       <interface>Button</interface>
       <scrollpos>0,0</scrollpos>
     </plugin_config>
-    <width>350</width>
-    <z>5</z>
-    <height>300</height>
-    <location_x>292</location_x>
-    <location_y>504</location_y>
+    <width>308</width>
+    <z>2</z>
+    <height>112</height>
+    <location_x>368</location_x>
+    <location_y>499</location_y>
   </plugin>
   <plugin>
     org.contikios.cooja.plugins.MoteInterfaceViewer
@@ -255,7 +255,7 @@
       <scrollpos>0,0</scrollpos>
     </plugin_config>
     <width>350</width>
-    <z>7</z>
+    <z>9</z>
     <height>300</height>
     <location_x>448</location_x>
     <location_y>160</location_y>
@@ -268,7 +268,7 @@
       <scrollpos>0,0</scrollpos>
     </plugin_config>
     <width>350</width>
-    <z>6</z>
+    <z>8</z>
     <height>300</height>
     <location_x>627</location_x>
     <location_y>161</location_y>
@@ -280,11 +280,11 @@
       <interface>Button</interface>
       <scrollpos>0,0</scrollpos>
     </plugin_config>
-    <width>350</width>
-    <z>4</z>
-    <height>300</height>
-    <location_x>619</location_x>
-    <location_y>505</location_y>
+    <width>312</width>
+    <z>1</z>
+    <height>106</height>
+    <location_x>360</location_x>
+    <location_y>621</location_y>
   </plugin>
   <plugin>
     org.contikios.cooja.plugins.MoteInterfaceViewer
@@ -294,10 +294,36 @@
       <scrollpos>0,0</scrollpos>
     </plugin_config>
     <width>350</width>
-    <z>2</z>
+    <z>6</z>
     <height>300</height>
-    <location_x>34</location_x>
-    <location_y>490</location_y>
+    <location_x>8</location_x>
+    <location_y>458</location_y>
+  </plugin>
+  <plugin>
+    org.contikios.cooja.plugins.MoteInterfaceViewer
+    <mote_arg>1</mote_arg>
+    <plugin_config>
+      <interface>Button</interface>
+      <scrollpos>0,0</scrollpos>
+    </plugin_config>
+    <width>308</width>
+    <z>4</z>
+    <height>108</height>
+    <location_x>684</location_x>
+    <location_y>500</location_y>
+  </plugin>
+  <plugin>
+    org.contikios.cooja.plugins.MoteInterfaceViewer
+    <mote_arg>3</mote_arg>
+    <plugin_config>
+      <interface>Button</interface>
+      <scrollpos>0,0</scrollpos>
+    </plugin_config>
+    <width>321</width>
+    <z>3</z>
+    <height>100</height>
+    <location_x>685</location_x>
+    <location_y>623</location_y>
   </plugin>
 </simconf>
 
