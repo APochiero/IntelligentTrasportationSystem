@@ -30,7 +30,7 @@ static void send_broadcast(struct broadcast_conn *c, int status, int num_tx) {
 static void recv_runicast(struct runicast_conn *c, const linkaddr_t *from, uint8_t seqno){}
 
 static void sent_runicast(struct runicast_conn *c, const linkaddr_t *to, uint8_t retransmissions){
-  if( DEBUG ) printf("G2 successfully linked to to %d.%d, retransmissions %d\n", to->u8[0], to->u8[1], retransmissions);
+  if( DEBUG ) printf("Runicast message successfully sent to %u.%u, retransmissions %d\n", to->u8[0], to->u8[1], retransmissions);
   if ( process_is_running(&Init) )
   	  process_post(&Init, PROCESS_EVENT_CONTINUE, NULL);
 }
@@ -126,8 +126,8 @@ PROCESS_THREAD(Sensing, ev, data) { 	// Sense temperature and humidity every 5 s
 	runicast_open(&runicast, 144, &runicast_calls);
 	etimer_set(&sensingTimer, CLOCK_SECOND*SENSINGINTERVAL);
 
-	int16_t temperature;
-	int16_t humidity;
+	uint8_t temperature;
+	uint8_t humidity;
 
 
 	while(1) {

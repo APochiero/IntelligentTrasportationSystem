@@ -114,18 +114,18 @@ static void sendNewVehicle(uint8_t type) { // Broadcast that new vehicle has arr
 
 #ifdef SENSE
 
-static void sendSensedData(uint8_t id, int16_t temperature, int16_t humidity ) {
+static void sendSensedData(uint8_t id, int16_t temperature, uint8_t humidity ) {
 	unsigned char msg[SENSINGPACKETSIZE];
 
-	// Packet format [ id/temperatureValue/humidityValue ]
+	// Packet format [ id/humidityValue/temperatureValue ]
 
-	sprintf(msg, "%d", id); // 0 TL2, 1 TL1, 2 G2
-	sprintf(msg+1,"/");
-	sprintf(msg+2, "%d", temperature);
-	sprintf(msg+4, "/");
-	sprintf(msg+5, "%d", humidity);
+	msg[0] = id;
+	msg[1] = humidity;
+	msg[2] = temperature >> 8 & 0xff;
+	msg[3] = temperature;
 
-	if (DEBUG ) printf("Sensing packet %s\n", msg );
+
+	if (DEBUG ) printf("Sensing packet %d %d %d \n", id, temperature, humidity);
 	packetbuf_copyfrom(msg,SENSINGPACKETSIZE);
     if(!runicast_is_transmitting(&runicast)) {
     	runicast_send(&runicast, &G1Sink, MAX_RETRANSMISSIONS);

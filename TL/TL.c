@@ -182,7 +182,7 @@ PROCESS_THREAD(Sensing, ev, data) { // Sense temperature and humidity every 5 se
 	etimer_set(&sensingTimer, CLOCK_SECOND*sensingInterval);
 
 	int16_t temperature;
-	int16_t humidity;
+	uint8_t humidity;
 
 	while(1) {
 		PROCESS_WAIT_EVENT_UNTIL( etimer_expired(&sensingTimer) );

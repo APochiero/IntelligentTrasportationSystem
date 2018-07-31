@@ -126,7 +126,7 @@ PROCESS_THREAD( TrafficScheduler, ev, data ) {
 PROCESS_THREAD(SensingSink, ev, data) { // Receive data sensed by the other sensors and write the average on RTD
 
 	static int16_t temperature[SENSORSCOUNT];
-	static int16_t humidity[SENSORSCOUNT];
+	static uint8_t humidity[SENSORSCOUNT];
 	static uint8_t isNew[SENSORSCOUNT-1]; // flags
 	static uint8_t index;
 	PROCESS_BEGIN();
@@ -143,10 +143,16 @@ PROCESS_THREAD(SensingSink, ev, data) { // Receive data sensed by the other sens
 	}
 	while(1) {
 		PROCESS_WAIT_EVENT_UNTIL(ev == sensing_ev);
-		char* packet = (char*) data;				// Packet format [ id/temperatureValue/humidityValue ]
-		index = atoi( strtok( packet,  '/') );
-		temperature[index] = atoi( strtok( packet + 2, '/') );
-		humidity[index] = atoi( strtok( packet + 5, '\0') );
+
+		if (DEBUG ) printf("G1: Packet Received\n" );
+		unsigned char tempBytes[2];
+		uint8_t* addrHum = (uint8_t*) (data + 1);
+		tempBytes[0] = *((char*) data + 2);
+		tempBytes[1] = *((char*) data + 3);
+		index = *(uint8_t* ) data;
+		humidity[index] = *addrHum;
+		temperature[index] = (tempBytes[0] << 8) | tempBytes[1];
+
 		isNew[index] = 1;
 		if (DEBUG ) printf("G1: Received from %d temp %d, hum %d \n", index, temperature[index], humidity[index]);
 

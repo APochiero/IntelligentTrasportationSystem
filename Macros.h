@@ -22,7 +22,7 @@
 #define PASSWORD "NES"
 #define MSGMAXSIZE 20
 
-#define SENSINGPACKETSIZE 9
+#define SENSINGPACKETSIZE 5
 #define MAX_RETRANSMISSIONS 5
 
 #define G1ADDRESS0 1
@@ -37,6 +37,6 @@
 #define TL2ADDRESS0 4
 #define TL2ADDRESS1 0
 
-#define DEBUG 0
+#define DEBUG 1
 
 #endif /* MACROS_H_ */
