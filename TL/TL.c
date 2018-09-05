@@ -22,7 +22,7 @@ PROCESS(LedSwitcher, "LedSwitcher");
 PROCESS(Sensing,"Sensing" );
 PROCESS(LowBatteryPower, "LowBatteryPower");
 
-AUTOSTART_PROCESSES(&Init, &LedSwitcher);
+AUTOSTART_PROCESSES(&Init);
 
 static void send_broadcast(struct broadcast_conn *c, int status, int num_tx) {}
 
@@ -85,6 +85,7 @@ PROCESS_THREAD(Init, ev, data) { 				// Link TLx to Gx then start other processe
 	street = atoi((char*) data);
 	if (DEBUG ) printf("TL linked: %d\n", street);
 	runicast_close(&runicast);
+	process_start(&LedSwitcher, NULL);
 	process_start(&TrafficScheduler, NULL);
 	process_start(&Sensing, NULL);
 	PROCESS_END();
@@ -226,7 +227,7 @@ PROCESS_THREAD(LowBatteryPower, ev, data) { // if battery is below 20, led blue 
 	static struct etimer blinkTimer;
 	PROCESS_BEGIN();
 	etimer_set(&blinkTimer, CLOCK_SECOND);
-	SENSORS_ACTIVATE(button_sensor);
+ 	SENSORS_ACTIVATE(button_sensor);
 	while(1) {
 		PROCESS_WAIT_EVENT();
 		if ( ev == sensors_event && data == &button_sensor ) {

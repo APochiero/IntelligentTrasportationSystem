@@ -153,7 +153,7 @@ PROCESS_THREAD(SensingSink, ev, data) { // Receive data sensed by the other sens
 		humidity[index] = *addrHum;
 		temperature[index] = (tempBytes[0] << 8) | tempBytes[1];
 
-		isNew[index] = 1;
+		isNew[index] = 1; // TL1 1, TL2 0, G2, 2
 		if (DEBUG ) printf("G1: Received from %d temp %d, hum %d \n", index, temperature[index], humidity[index]);
 
 		if( isNew[0] == 1 && isNew[1] == 1 && isNew[2] == 1) { // if every value is new
